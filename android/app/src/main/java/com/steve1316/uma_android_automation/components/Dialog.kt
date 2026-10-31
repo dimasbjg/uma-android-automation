@@ -325,6 +325,7 @@ object DialogObjects {
         listOf(
             DialogAccountLink,
             DialogAgeConfirmation,
+            DialogAgenda,
             DialogAgendaDetails,
             DialogAutoFill,
             DialogAutoSelect,
@@ -477,6 +478,9 @@ val DialogAccountLink = dialog("account_link", "Account Link", buttons = listOf(
  * However since we never want to handle those buttons, we won't even add them in here.
  */
 val DialogAgeConfirmation = dialog("age_confirmation", "Age Confirmation", buttons = listOf(ButtonCancel))
+
+/** Final Confirmation -> Independent Training -> Agenda Edit. In a career the same screen is titled "Scheduled Races". */
+val DialogAgenda = dialog("agenda", "Agenda", buttons = listOf(ButtonClose))
 
 /** Career */
 val DialogAgendaDetails = dialog("agenda_details", "Agenda Details", buttons = listOf(ButtonClose))

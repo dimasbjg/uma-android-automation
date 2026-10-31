@@ -82,6 +82,11 @@ export interface Settings {
         friendCard: string
         friendMaxRefreshes: number
         startNextCareerWhenDone: boolean
+        independentTrainingLoop: boolean
+        independentTrainingAgenda: string
+        independentTrainingAgendaTitle: string
+        independentTrainingPollMinutes: number
+        independentTrainingEventBoost: boolean
     }
 
     // Racing settings
@@ -362,6 +367,11 @@ export const defaultSettings: Settings = {
         friendCard: "",
         friendMaxRefreshes: 3,
         startNextCareerWhenDone: false,
+        independentTrainingLoop: false,
+        independentTrainingAgenda: "Keep current",
+        independentTrainingAgendaTitle: "",
+        independentTrainingPollMinutes: 5,
+        independentTrainingEventBoost: false,
     },
     racing: {
         ignoreConsecutiveRaceWarning: false,

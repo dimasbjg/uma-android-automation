@@ -2953,7 +2953,8 @@ abstract class Campaign(game: Game) : Task(game) {
 
                 if (skillPlan.skillPlans["careerComplete"]?.bIsEnabled ?: false) {
                     game.wait(0.5)
-                    careerEndSkillsButton.click(game.imageUtils)
+                    // A claimed Independent Training ends on the regular end screen, which has the full-size Skills button even in a scenario that uses another.
+                    careerEndSkillsButton.click(game.imageUtils) || ButtonCareerEndSkills.click(game.imageUtils)
                     game.wait(1.0)
                     if (!handleSkillListScreen()) {
                         MessageLog.w(TAG, "[WARN] process:: handleSkillList() failed.")

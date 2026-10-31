@@ -87,4 +87,74 @@ class CareerSetupTest {
             assertFalse(wantsEventBoost(tp = 66, spend = null, bTicked = true))
         }
     }
+
+    /** Unit tests for matching an agenda header on My Agendas to the Independent Training agenda in the settings. */
+    @DisplayName("Agenda title")
+    @Nested
+    inner class AgendaTitleTest {
+        @Test
+        @DisplayName("Matches the same title regardless of case and spacing")
+        fun exact() {
+            assertTrue(matchesAgendaTitle("Agenda 6", "Agenda 6"))
+            assertTrue(matchesAgendaTitle(" agenda 6 ", "Agenda 6"))
+            assertTrue(matchesAgendaTitle("nosprint", "NoSprint"))
+            assertTrue(matchesAgendaTitle("Agenda I", "Agenda 1"))
+            assertTrue(matchesAgendaTitle("Agenda l", "Agenda 1"))
+        }
+
+        @Test
+        @DisplayName("Never matches a different agenda, even one sharing its start")
+        fun different() {
+            assertFalse(matchesAgendaTitle("Agenda 1", "Agenda 6"))
+            assertFalse(matchesAgendaTitle("nosprint", "nosprdirt"))
+            assertFalse(matchesAgendaTitle("Agenda", "Agenda 6"))
+            assertFalse(matchesAgendaTitle("Scheduled 0", "Agenda 6"))
+        }
+
+        @Test
+        @DisplayName("Matches a long title cut off by the header crop")
+        fun cutOff() {
+            assertTrue(matchesAgendaTitle("generic pace pl", "generic pace plan for long"))
+            assertFalse(matchesAgendaTitle("generic", "generic pace plan for long"))
+        }
+
+        @Test
+        @DisplayName("Never matches an empty read or an empty title")
+        fun empty() {
+            assertFalse(matchesAgendaTitle("", "Agenda 6"))
+            assertFalse(matchesAgendaTitle("Agenda 6", " "))
+        }
+    }
+
+    /** Unit tests for reading the Training screen's timer and pacing the wait on it. */
+    @DisplayName("Independent Training wait")
+    @Nested
+    inner class TrainingWaitTest {
+        @Test
+        @DisplayName("Reads the timer, including a colon read as a period")
+        fun parsesTimer() {
+            assertEquals(2978, parseTimeLeft("0:49:38 left"))
+            assertEquals(2978, parseTimeLeft("O 0.49:38 left"))
+            assertEquals(2996, parseTimeLeft("O:49:56 left"))
+            assertEquals(0, parseTimeLeft("0:00:00 left"))
+            assertEquals(3661, parseTimeLeft("1:01:01"))
+        }
+
+        @Test
+        @DisplayName("Gives up on text that is not a timer")
+        fun unreadableTimer() {
+            assertEquals(null, parseTimeLeft(""))
+            assertEquals(null, parseTimeLeft("Training..."))
+            assertEquals(null, parseTimeLeft("0:75:00 left"))
+        }
+
+        @Test
+        @DisplayName("Waits until the timer ends, but never past the poll interval")
+        fun waits() {
+            assertEquals(300, trainingWaitSeconds(2978, pollMinutes = 5))
+            assertEquals(100, trainingWaitSeconds(90, pollMinutes = 5))
+            assertEquals(10, trainingWaitSeconds(0, pollMinutes = 5))
+            assertEquals(300, trainingWaitSeconds(null, pollMinutes = 5))
+        }
+    }
 }

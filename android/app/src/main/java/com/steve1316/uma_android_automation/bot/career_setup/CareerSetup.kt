@@ -17,18 +17,23 @@ import com.steve1316.uma_android_automation.components.ButtonCareerStartArrowRig
 import com.steve1316.uma_android_automation.components.ButtonCareerStartDeckArrowLeft
 import com.steve1316.uma_android_automation.components.ButtonCareerStartDeckArrowRight
 import com.steve1316.uma_android_automation.components.ButtonCareerStartHomeCareer
+import com.steve1316.uma_android_automation.components.ButtonCareerStartIndependentAgendaEdit
 import com.steve1316.uma_android_automation.components.ButtonCareerStartIndependentStart
 import com.steve1316.uma_android_automation.components.ButtonCareerStartLegacyReset
 import com.steve1316.uma_android_automation.components.ButtonCareerStartStorySkipOff
 import com.steve1316.uma_android_automation.components.ButtonCareerStartStorySkipOne
 import com.steve1316.uma_android_automation.components.ButtonCareerStartStorySkipTwo
+import com.steve1316.uma_android_automation.components.ButtonClose
 import com.steve1316.uma_android_automation.components.ButtonCompleteCareer
 import com.steve1316.uma_android_automation.components.ButtonConfirm
 import com.steve1316.uma_android_automation.components.ButtonHomeFullStats
 import com.steve1316.uma_android_automation.components.ButtonMenuBarHome
+import com.steve1316.uma_android_automation.components.ButtonMyAgendas
 import com.steve1316.uma_android_automation.components.ButtonNext
 import com.steve1316.uma_android_automation.components.ButtonNo
 import com.steve1316.uma_android_automation.components.ButtonOk
+import com.steve1316.uma_android_automation.components.ButtonOverwrite
+import com.steve1316.uma_android_automation.components.ButtonRaceAgendaLoadList
 import com.steve1316.uma_android_automation.components.ButtonSelectLegacy
 import com.steve1316.uma_android_automation.components.ButtonSkip
 import com.steve1316.uma_android_automation.components.ButtonStartCareer
@@ -37,13 +42,16 @@ import com.steve1316.uma_android_automation.components.ComponentInterface
 import com.steve1316.uma_android_automation.components.DialogBorrowCard
 import com.steve1316.uma_android_automation.components.DialogConfirmAutoSelect
 import com.steve1316.uma_android_automation.components.DialogConfirmRestoreRP
+import com.steve1316.uma_android_automation.components.DialogDateChanged
 import com.steve1316.uma_android_automation.components.DialogDisplaySettings
 import com.steve1316.uma_android_automation.components.DialogFinalConfirmation
 import com.steve1316.uma_android_automation.components.DialogIndependentTraining
 import com.steve1316.uma_android_automation.components.DialogInterface
+import com.steve1316.uma_android_automation.components.DialogOverwrite
 import com.steve1316.uma_android_automation.components.DialogUtils
 import com.steve1316.uma_android_automation.components.IconCareerStartTpCostHalved
 import com.steve1316.uma_android_automation.components.LabelCareerStartIndependentTrainingComplete
+import com.steve1316.uma_android_automation.components.LabelCareerStartIndependentTrainingTimeLeft
 import com.steve1316.uma_android_automation.components.LabelCareerStartLegacySelectHeader
 import com.steve1316.uma_android_automation.components.LabelCareerStartPotentialLvl
 import com.steve1316.uma_android_automation.components.LabelCareerStartScenarioSelectHeader
@@ -99,6 +107,31 @@ private const val DECK_COUNT_H = 42
 /** The Normal Career tab on Final Confirmation, from the Cancel button. */
 private const val NORMAL_CAREER_TAB_DX = -20
 private const val NORMAL_CAREER_TAB_DY = -1450
+
+/** The Independent Training tab on Final Confirmation, from the Cancel button. */
+private const val INDEPENDENT_TAB_DX = 492
+private const val INDEPENDENT_TAB_DY = -1450
+
+/** A My Agendas card's title on its green header bar, from the card's Load List button. The shared reader thresholds the crop, which wipes out the white title. */
+private val AGENDA_HEADER = intArrayOf(-830, -215, 560, 45)
+
+/** The "0:49:38 left" timer on the Training screen, from the "Time Left" pill. */
+private val TRAINING_TIME_LEFT = intArrayOf(191, -43, 200, 50)
+
+/** Extra seconds waited past the timer, so the results have time to show. */
+private const val TRAINING_END_BUFFER_SECONDS = 10
+
+/** The timer as hours, minutes and seconds, such as 0:49:38. OCR may read a colon as a period. */
+private val TIME_LEFT = Regex("(\\d{1,2})[:.](\\d{2})[:.](\\d{2})")
+
+/** How many times My Agendas is scrolled looking for the agenda. Each scroll moves about one card. */
+private const val MAX_AGENDA_SCROLLS = 10
+
+/** How far one scroll of My Agendas drags, about one card's height. */
+private const val AGENDA_SCROLL_DY = 330
+
+/** The shortest agenda header that may match a longer title by its start. The header crop cuts long titles off, while a short read like "Agenda" must not match "Agenda 6". */
+private const val MIN_AGENDA_PREFIX = 10
 
 /** The "Spend N TP to begin training?" line on Final Confirmation, from the Cancel button. */
 private val FINAL_CONFIRMATION_SPEND_LINE = intArrayOf(-40, -205, 560, 50)
@@ -205,6 +238,50 @@ internal fun wantsEventBoost(tp: Int?, spend: Int?, bTicked: Boolean): Boolean {
     return tp >= if (bTicked) spend else spend * 2
 }
 
+/**
+ * Reads the Training screen's timer.
+ *
+ * @param text The OCR text, such as "0:49:38 left".
+ * @returns The seconds left, or null when no timer could be read.
+ */
+internal fun parseTimeLeft(text: String): Int? {
+    // OCR reads the leading 0 as the letter O.
+    val (h, m, sec) = TIME_LEFT.find(text.replace('O', '0').replace('o', '0'))?.destructured ?: return null
+    val minutes = m.toInt()
+    val seconds = sec.toInt()
+    if (minutes > 59 || seconds > 59) return null
+    return h.toInt() * 3600 + minutes * 60 + seconds
+}
+
+/**
+ * How long to wait before looking at the Training screen again: until the timer ends, but never longer than the poll interval, so a dialog such as
+ * Date Changed is noticed.
+ *
+ * @param secondsLeft The timer in seconds, or null when it could not be read.
+ * @param pollMinutes The longest wait in minutes.
+ * @returns The wait in seconds.
+ */
+internal fun trainingWaitSeconds(secondsLeft: Int?, pollMinutes: Int): Int {
+    val poll = pollMinutes * 60
+    return if (secondsLeft == null) poll else minOf(secondsLeft + TRAINING_END_BUFFER_SECONDS, poll)
+}
+
+/**
+ * Whether an agenda header read on My Agendas names the wanted agenda, ignoring case. The header crop cuts long titles off, so a long enough read also
+ * matches the start of the title.
+ *
+ * @param header The header text read by OCR.
+ * @param wanted The agenda title from the settings.
+ * @returns True if the header is the wanted agenda.
+ */
+internal fun matchesAgendaTitle(header: String, wanted: String): Boolean {
+    // OCR reads the 1 in "Agenda 1" as I or l.
+    val read = header.trim().lowercase().replace(Regex("^agenda [il]$"), "agenda 1")
+    val title = wanted.trim().lowercase()
+    if (read.isEmpty() || title.isEmpty()) return false
+    return read == title || (read.length >= MIN_AGENDA_PREFIX && title.startsWith(read))
+}
+
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Settings
@@ -227,6 +304,14 @@ data class CareerSetupSettings(
     val friendCard: String,
     /** How many times to refresh the Borrow Card list before falling back. */
     val friendMaxRefreshes: Int,
+    /** True to start Independent Trainings instead of normal careers and wait for each one to finish. */
+    val independentTrainingLoop: Boolean,
+    /** The saved agenda title to load on the Independent Training tab, or [KEEP_CURRENT_AGENDA] to leave the remembered one. */
+    val independentTrainingAgenda: String,
+    /** The longest wait between checks of the Training screen, in minutes. */
+    val independentTrainingPollMinutes: Int,
+    /** True to tick Event Boost for an Independent Training when the TP covers its doubled cost. Off leaves it unticked. */
+    val independentTrainingEventBoost: Boolean,
     /** The Smart Race Solver's character preset while the solver is on, else null. */
     val solverCharacter: String?,
     /** Character names with a goal race that is always a Long race, which Smart Auto-Select ranks Stamina first for. */
@@ -244,6 +329,9 @@ data class CareerSetupSettings(
         /** The wish list used when Smart Auto-Select cannot tell which outfit was picked. */
         val FALLBACK_WISH_LIST: List<String> = listOf("SPD", "STA", "PWR")
 
+        /** The Independent Training agenda choice that leaves the game's remembered agenda in place. */
+        const val KEEP_CURRENT_AGENDA = "Keep current"
+
         /**
          * Reads the settings and catalogs from SQLite.
          *
@@ -259,6 +347,14 @@ data class CareerSetupSettings(
                 deckNumber = SettingsHelper.getIntSetting("careerSetup", "deckNumber", 0),
                 friendCard = SettingsHelper.getStringSetting("careerSetup", "friendCard"),
                 friendMaxRefreshes = SettingsHelper.getIntSetting("careerSetup", "friendMaxRefreshes", 3),
+                independentTrainingLoop = SettingsHelper.getBooleanSetting("careerSetup", "independentTrainingLoop", false),
+                // A custom title replaces the picked agenda's default title, the same way the Racing page's in-game agenda works.
+                independentTrainingAgenda =
+                    SettingsHelper.getStringSetting("careerSetup", "independentTrainingAgendaTitle").trim().ifEmpty {
+                        SettingsHelper.getStringSetting("careerSetup", "independentTrainingAgenda").ifEmpty { KEEP_CURRENT_AGENDA }
+                    },
+                independentTrainingPollMinutes = SettingsHelper.getIntSetting("careerSetup", "independentTrainingPollMinutes", 5).coerceIn(1, 15),
+                independentTrainingEventBoost = SettingsHelper.getBooleanSetting("careerSetup", "independentTrainingEventBoost", false),
                 solverCharacter =
                     SettingsHelper.getStringSetting("racing", "smartRaceSolverCharacterPreset").takeIf {
                         it.isNotEmpty() &&
@@ -345,10 +441,12 @@ class CareerSetup(private val game: Game, private val bDryRun: Boolean = false) 
          *
          * @param game Reference to the bot's [Game] instance.
          * @param bitmap The screenshot to check.
-         * @returns True when the bottom menu bar or the Final Confirmation dialog is showing.
+         * @returns True when the bottom menu bar, the Final Confirmation dialog, or a running Independent Training's Training screen is showing.
          */
         fun isOutsideCareer(game: Game, bitmap: Bitmap): Boolean =
-            ButtonMenuBarHome.check(game.imageUtils, sourceBitmap = bitmap) || DialogUtils.getDialogOrNull(game.imageUtils, bitmap)?.name == DialogFinalConfirmation.name
+            ButtonMenuBarHome.check(game.imageUtils, sourceBitmap = bitmap) ||
+                DialogUtils.getDialogOrNull(game.imageUtils, bitmap)?.name == DialogFinalConfirmation.name ||
+                LabelCareerStartIndependentTrainingTimeLeft.check(game.imageUtils, sourceBitmap = bitmap)
     }
 
     private val settings = CareerSetupSettings.load()
@@ -377,6 +475,9 @@ class CareerSetup(private val game: Game, private val bDryRun: Boolean = false) 
     /** Whether a finished Independent Training is being claimed, which ends on its end-of-career screen instead of starting a career. */
     private var bClaimingIndependentTraining = false
 
+    /** Whether the agenda was loaded on the Independent Training tab during this setup. */
+    private var bAgendaDone = false
+
     /** The Smart sparks for the outfit picked on Trainee Select, worked out once when the first parent is picked. */
     private val smartWishList: List<String> by lazy {
         val outfit = selectedOutfit
@@ -400,11 +501,19 @@ class CareerSetup(private val game: Game, private val bDryRun: Boolean = false) 
     fun run(): Boolean {
         MessageLog.i(TAG, "[CAREER SETUP] Starting a new ${settings.scenario} career.")
         MessageLog.i(TAG, "[CAREER SETUP] Plan: ${describePlan()}.")
-        repeat(MAX_TICKS) {
+        var ticks = 0
+        while (ticks < MAX_TICKS) {
+            ticks++
             val bitmap = game.imageUtils.getSourceBitmap()
             val dialog = DialogUtils.getDialogOrNull(game.imageUtils, bitmap)
             if (dialog != null) {
                 handleDialog(dialog)
+            } else if (LabelCareerStartIndependentTrainingTimeLeft.check(game.imageUtils, sourceBitmap = bitmap)) {
+                waitForIndependentTraining(bitmap)
+                // Its results show on this screen when the timer ends, and are claimed like one finished from the Career dialog.
+                bClaimingIndependentTraining = true
+                // The wait is progress, so it never counts toward giving up on the setup.
+                ticks = 0
             } else if (bClaimingIndependentTraining && ButtonCompleteCareer.check(game.imageUtils, sourceBitmap = bitmap)) {
                 MessageLog.i(TAG, "[CAREER SETUP] Claimed the Independent Training. Handing its end-of-career screen to the career loop.")
                 return true
@@ -595,6 +704,15 @@ class CareerSetup(private val game: Game, private val bDryRun: Boolean = false) 
 
             DialogIndependentTraining.name -> handleIndependentTraining()
 
+            // The daily reset sends the game back to Home with login rewards and announcements the setup does not handle. The training stays claimable.
+            DialogDateChanged.name -> {
+                if (!settings.independentTrainingLoop) {
+                    DialogDateChanged.ok(game.imageUtils)
+                } else {
+                    throw CampaignBreakpointException("Daily reset (Date Changed) during the Independent Training loop. Start the bot again from Home to claim the training. Stopping bot...")
+                }
+            }
+
             // Starting a career with too little TP asks to restore it, which shares its title and buttons with the RP prompt. TP is never restored.
             DialogConfirmRestoreRP.name -> {
                 ButtonNo.click(game.imageUtils, tries = 3)
@@ -614,6 +732,10 @@ class CareerSetup(private val game: Game, private val bDryRun: Boolean = false) 
 
     /** Makes sure the Normal Career tab is active, then taps Start Career! and checks the career actually starts. */
     private fun handleFinalConfirmation() {
+        if (settings.independentTrainingLoop) {
+            startIndependentTraining()
+            return
+        }
         if (ButtonCareerStartIndependentStart.check(game.imageUtils) && !ButtonStartCareer.check(game.imageUtils)) {
             MessageLog.i(TAG, "[CAREER SETUP] Switching Final Confirmation to the Normal Career tab.")
             tapAnchored(game, anchorOf(ButtonCancel, game.imageUtils.getSourceBitmap()), NORMAL_CAREER_TAB_DX, NORMAL_CAREER_TAB_DY)
@@ -631,17 +753,141 @@ class CareerSetup(private val game: Game, private val bDryRun: Boolean = false) 
     }
 
     /**
+     * Waits on the Training screen of a running Independent Training, until its timer ends or for at most the poll interval. Stop and pause still end
+     * the wait at once.
+     *
+     * @param bitmap The screenshot of the Training screen.
+     * @throws CampaignBreakpointException When the loop is off, since nothing would start the next training.
+     */
+    private fun waitForIndependentTraining(bitmap: Bitmap) {
+        if (!settings.independentTrainingLoop) {
+            throw CampaignBreakpointException("An Independent Training is running. Turn on Independent Training Loop to wait for it, or start the bot again once it finishes.")
+        }
+        val text = ocr(bitmap, anchorOf(LabelCareerStartIndependentTrainingTimeLeft, bitmap), TRAINING_TIME_LEFT, "trainingTimeLeft")
+        val secondsLeft = parseTimeLeft(text)
+        val waitSeconds = trainingWaitSeconds(secondsLeft, settings.independentTrainingPollMinutes)
+        val left = secondsLeft?.let { "%d:%02d:%02d".format(it / 3600, it / 60 % 60, it % 60) } ?: "unreadable (\"$text\")"
+        MessageLog.i(TAG, "[CAREER SETUP] Independent Training time left: $left. Checking again in ${waitSeconds / 60}m ${waitSeconds % 60}s.")
+        game.wait(waitSeconds.toDouble(), skipWaitingForLoading = true)
+    }
+
+    /** Switches Final Confirmation to the Independent Training tab, loads the agenda, then taps Start!. */
+    private fun startIndependentTraining() {
+        if (!ButtonCareerStartIndependentStart.check(game.imageUtils)) {
+            MessageLog.i(TAG, "[CAREER SETUP] Switching Final Confirmation to the Independent Training tab.")
+            tapAnchored(game, anchorOf(ButtonCancel, game.imageUtils.getSourceBitmap()), INDEPENDENT_TAB_DX, INDEPENDENT_TAB_DY)
+            game.wait(1.0)
+            if (!ButtonCareerStartIndependentStart.check(game.imageUtils, tries = 3)) throw CampaignBreakpointException("Could not open the Independent Training tab on Final Confirmation.")
+        }
+        if (!bAgendaDone) {
+            loadIndependentAgenda()
+            bAgendaDone = true
+        }
+        setEventBoost(bAllowBoost = settings.independentTrainingEventBoost)
+        if (bDryRun) throw CampaignBreakpointException("Career Setup Test reached Final Confirmation on the Independent Training tab. Stopping before Start!.")
+        if (!ButtonCareerStartIndependentStart.click(game.imageUtils, tries = 5)) throw CampaignBreakpointException("Could not find Start! on Final Confirmation.")
+        MessageLog.i(TAG, "[CAREER SETUP] Tapped Start! for an Independent Training.")
+        game.wait(3.0)
+    }
+
+    /**
+     * Loads the agenda from the settings on the Independent Training tab: Edit, My Agendas, the agenda's Load List, then back to Final Confirmation.
+     * Keep current leaves the agenda the game remembers.
+     *
+     * @throws CampaignBreakpointException When the agenda cannot be found, so no training starts with the wrong agenda.
+     */
+    private fun loadIndependentAgenda() {
+        val wanted = settings.independentTrainingAgenda
+        if (wanted == CareerSetupSettings.KEEP_CURRENT_AGENDA) {
+            MessageLog.i(TAG, "[CAREER SETUP] Keeping the agenda the game remembers.")
+            return
+        }
+        MessageLog.i(TAG, "[CAREER SETUP] Loading the \"$wanted\" agenda.")
+        if (!ButtonCareerStartIndependentAgendaEdit.click(game.imageUtils, tries = 3)) throw CampaignBreakpointException("Could not find the agenda's Edit button on the Independent Training tab.")
+        game.wait(1.5)
+        if (!ButtonMyAgendas.click(game.imageUtils, tries = 3)) throw CampaignBreakpointException("Could not find My Agendas on the Agenda screen.")
+        game.wait(1.5)
+        val bLoaded = findAndLoadAgenda(wanted)
+        closeAgendaScreens()
+        if (!bLoaded) throw CampaignBreakpointException("Could not find the \"$wanted\" agenda in My Agendas. Check the Independent Training agenda in Career Setup.")
+        MessageLog.i(TAG, "[CAREER SETUP] Loaded the \"$wanted\" agenda.")
+    }
+
+    /**
+     * Scrolls My Agendas until a card's header names the wanted agenda, then taps its Load List and accepts the Overwrite prompt. Overwrite only replaces
+     * the schedule being edited, never a saved agenda. Save Here is never tapped.
+     *
+     * @param wanted The agenda title from the settings.
+     * @returns True if the agenda was loaded, false if the list ended without it.
+     */
+    private fun findAndLoadAgenda(wanted: String): Boolean {
+        var lastHeaders: List<String>? = null
+        repeat(MAX_AGENDA_SCROLLS) { attempt ->
+            val bitmap = game.imageUtils.getSourceBitmap()
+            val buttons = ButtonRaceAgendaLoadList.findAll(game.imageUtils, sourceBitmap = bitmap)
+            if (buttons.isEmpty()) {
+                MessageLog.w(TAG, "[CAREER SETUP] No Load List buttons on My Agendas.")
+                return false
+            }
+            val headers = buttons.associateWith { ocr(bitmap, it, AGENDA_HEADER, "agendaHeader").trim() }
+            val match = headers.entries.firstOrNull { matchesAgendaTitle(it.value, wanted) }
+            if (match != null) {
+                MessageLog.i(TAG, "[CAREER SETUP] Found \"${match.value}\". Tapping its Load List.")
+                game.gestureUtils.tap(match.key.x, match.key.y, ButtonRaceAgendaLoadList.template.path)
+                game.wait(1.5)
+                // A schedule that already has races asks before it is replaced. An empty one loads straight away.
+                if (ButtonOverwrite.click(game.imageUtils, tries = 3)) {
+                    MessageLog.i(TAG, "[CAREER SETUP] Overwrote the current schedule.")
+                    game.wait(1.5)
+                }
+                return true
+            }
+            // The same headers after a scroll mean the list is at its end.
+            val shown = headers.values.toList()
+            if (shown == lastHeaders) return false
+            lastHeaders = shown
+            MessageLog.i(TAG, "[CAREER SETUP] \"$wanted\" is not among ${shown.joinToString(", ") { "\"$it\"" }}. Scrolling My Agendas (${attempt + 1}/$MAX_AGENDA_SCROLLS).")
+            // Drag slowly from the lowest card so the list moves about one card. A fast swipe flings it past cards it never reads.
+            val from = buttons.maxBy { it.y }
+            game.gestureUtils.swipe(from.x.toFloat(), from.y.toFloat(), from.x.toFloat(), (from.y - AGENDA_SCROLL_DY).toFloat(), duration = 1500L)
+            game.wait(1.0)
+        }
+        return false
+    }
+
+    /**
+     * Closes My Agendas and the Agenda screen until Final Confirmation shows again. After a load the game closes My Agendas by itself.
+     *
+     * @throws CampaignBreakpointException When Final Confirmation does not come back.
+     */
+    private fun closeAgendaScreens() {
+        repeat(5) {
+            when (DialogUtils.getDialogOrNull(game.imageUtils)?.name) {
+                DialogFinalConfirmation.name -> return
+                // Only left open if tapping Overwrite failed, so the old schedule stays.
+                DialogOverwrite.name -> ButtonCancel.click(game.imageUtils, tries = 3)
+                // My Agendas, the Agenda screen, or a title read slightly wrong. Save Here is never near Close, so Close is safe on all of them.
+                else -> ButtonClose.click(game.imageUtils, tries = 3)
+            }
+            game.wait(1.5)
+        }
+        throw CampaignBreakpointException("Could not get back to Final Confirmation after loading the agenda.")
+    }
+
+    /**
      * Ticks Event Boost on Final Confirmation when the TP covers its doubled cost, and unticks it otherwise so the career can still start.
      * Nothing happens when no boost event runs, since the dialog then has no checkbox.
+     *
+     * @param bAllowBoost False to always leave Event Boost unticked.
      */
-    private fun setEventBoost() {
+    private fun setEventBoost(bAllowBoost: Boolean = true) {
         val bitmap = game.imageUtils.getSourceBitmap()
         val checkbox = Checkbox.findImageWithBitmap(game.imageUtils, bitmap) ?: return
         val bTicked = Checkbox.isTicked(game.imageUtils, bitmap, checkbox)
         val cancel = anchorOf(ButtonCancel, bitmap)
         val spend = ocrInt(bitmap, cancel, FINAL_CONFIRMATION_SPEND_LINE, "finalConfirmationSpend")
         val tp = ocrInt(bitmap, cancel, FINAL_CONFIRMATION_CURRENT_TP, "finalConfirmationTp")
-        val bWanted = wantsEventBoost(tp, spend, bTicked)
+        val bWanted = bAllowBoost && wantsEventBoost(tp, spend, bTicked)
         MessageLog.i(TAG, "[CAREER SETUP] Event Boost ${if (bWanted) "on" else "off"} (TP ${tp ?: "unreadable"}, spend ${spend ?: "unreadable"}${if (bTicked) " while ticked" else ""}).")
         if (bWanted != bTicked) {
             game.tap(checkbox.x, checkbox.y)
@@ -676,7 +922,14 @@ class CareerSetup(private val game: Game, private val bDryRun: Boolean = false) 
             }
         val deck = if (settings.deckNumber in 1..10) "use Deck ${settings.deckNumber}" else "keep the current deck"
         val friend = settings.supportCards[settings.friendCard]?.let { "borrow ${it.label}" } ?: "borrow a smart friend card"
-        return "$trainee, $parents, $deck, $friend"
+        val start =
+            if (settings.independentTrainingLoop) {
+                val agenda = if (settings.independentTrainingAgenda == CareerSetupSettings.KEEP_CURRENT_AGENDA) "the remembered agenda" else "the \"${settings.independentTrainingAgenda}\" agenda"
+                ", then start an Independent Training with $agenda"
+            } else {
+                ""
+            }
+        return "$trainee, $parents, $deck, $friend$start"
     }
 
     /** Taps the story skip button once and lets its animation finish, moving it one step toward full speed. */

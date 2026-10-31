@@ -61,6 +61,7 @@ const createStyles = (colors: ThemeColors) =>
         searchInput: { borderWidth: 1, borderColor: colors.borderHair, borderRadius: RADII.md, padding: SPACING.md, ...TYPE.body, color: colors.text, backgroundColor: colors.bg },
         emptyText: { ...TYPE.caption, color: colors.textMuted, padding: SPACING.md },
         modalFooterRow: { flexDirection: "row", gap: SPACING.sm },
+        inputShell: { padding: SPACING.md, gap: SPACING.xs },
     })
 
 /** Widest a value pill grows before its label is cut with "...", so outfit and card names fit the row. */
@@ -79,8 +80,11 @@ const LEGACY_MODES: { value: string; label: string; description: string }[] = [
 /** Deck choices: keep the current deck, or Deck 1-10. */
 const DECK_OPTIONS: { value: number; label: string }[] = [{ value: 0, label: "Keep current" }, ...Array.from({ length: 10 }, (_, i) => ({ value: i + 1, label: `Deck ${i + 1}` }))]
 
+/** Independent Training agenda choices: keep the one the game remembers, or a saved agenda by its default title. Mirrors the Racing page's agenda list. */
+const INDEPENDENT_AGENDA_OPTIONS = ["Keep current", ...Array.from({ length: 8 }, (_, i) => `Agenda ${i + 1}`)]
+
 /** Which sheet is open. */
-type OpenSheet = null | "trainee" | "legacyMode" | "wishList" | "deck" | "friend"
+type OpenSheet = null | "trainee" | "legacyMode" | "wishList" | "deck" | "friend" | "independentAgenda"
 
 /** One trainee outfit as listed in the picker. */
 interface OutfitOption {
@@ -245,6 +249,81 @@ const CareerSetupSettings = () => {
                             />
                         </Section>
 
+                        <Section label="Independent Training">
+                            <View>
+                                <ToggleSetting
+                                    id="career-setup-independent-training-loop"
+                                    title="Independent Training Loop"
+                                    description="Starts an Independent Training instead of a normal career, waits on its Training screen until it finishes, claims and completes it, then starts the next one until TP runs out."
+                                    checked={settings.independentTrainingLoop}
+                                    onCheckedChange={(checked) => updateCareerSetup({ independentTrainingLoop: checked })}
+                                />
+                                {settings.independentTrainingLoop && !skills.plans.careerComplete.enabled && (
+                                    <WarningContainer style={{ marginBottom: SPACING.md }}>
+                                        Warning: Each training is completed without stopping, so any skill points left at the end are lost. Turn on the Career Complete skill plan to spend them first.
+                                    </WarningContainer>
+                                )}
+                            </View>
+                            <SearchableItem
+                                id="career-setup-independent-training-agenda"
+                                title="Independent Training Agenda"
+                                description="The saved in-game agenda to load on the Independent Training tab before starting."
+                                parentId="career-setup-independent-training-loop"
+                            >
+                                <Row
+                                    title="Agenda"
+                                    description="The saved in-game agenda to load on the Independent Training tab before starting."
+                                    disabled={!settings.independentTrainingLoop}
+                                    onPress={() => show("independentAgenda")}
+                                    right={pill(settings.independentTrainingAgenda)}
+                                />
+                            </SearchableItem>
+                            <SearchableItem
+                                id="career-setup-independent-training-agenda-title"
+                                title="Custom Agenda Title"
+                                description="If you renamed the agenda in-game, enter its title here. Leave blank to use the agenda picked above."
+                                parentId="career-setup-independent-training-loop"
+                            >
+                                <View style={[styles.inputShell, !settings.independentTrainingLoop && styles.disabled]}>
+                                    <Text style={styles.selectorTitle}>Custom Agenda Title (Optional)</Text>
+                                    <Text style={styles.selectorDescription}>If you renamed the agenda in-game, enter its title here. Leave blank to use the agenda picked above.</Text>
+                                    <Input
+                                        style={styles.searchInput}
+                                        value={settings.independentTrainingAgendaTitle}
+                                        editable={settings.independentTrainingLoop}
+                                        onChangeText={(text) => updateCareerSetup({ independentTrainingAgendaTitle: text })}
+                                        placeholder="Leave blank to use the agenda picked above"
+                                        autoCapitalize="none"
+                                        autoCorrect={false}
+                                    />
+                                </View>
+                            </SearchableItem>
+                            <ToggleSetting
+                                id="career-setup-independent-training-event-boost"
+                                title="Use Event Boost"
+                                description="Ticks Event Boost on each Independent Training when the TP covers its doubled cost. Off keeps every training at the normal cost, so the loop runs more trainings."
+                                checked={settings.independentTrainingEventBoost}
+                                onCheckedChange={(checked) => updateCareerSetup({ independentTrainingEventBoost: checked })}
+                                condition={settings.independentTrainingLoop}
+                                parentId="career-setup-independent-training-loop"
+                            />
+                            <View style={[styles.sliderShell, !settings.independentTrainingLoop && styles.disabled]} pointerEvents={settings.independentTrainingLoop ? "auto" : "none"}>
+                                <CustomSlider
+                                    searchId="career-setup-independent-training-poll-minutes"
+                                    value={settings.independentTrainingPollMinutes}
+                                    placeholder={defaultSettings.careerSetup.independentTrainingPollMinutes}
+                                    onValueChange={(value) => updateCareerSetup({ independentTrainingPollMinutes: value })}
+                                    min={1}
+                                    max={15}
+                                    step={1}
+                                    label="Check Every (Minutes)"
+                                    showValue={true}
+                                    showLabels={true}
+                                    description="The longest the bot sleeps between checks of the Training screen. A shorter time catches the Date Changed dialog sooner."
+                                />
+                            </View>
+                        </Section>
+
                         <Section label="Trainee">
                             <ToggleSetting
                                 id="career-setup-use-preselected-trainee"
@@ -405,6 +484,23 @@ const CareerSetupSettings = () => {
                             selected={d.value === settings.deckNumber}
                             onPress={() => {
                                 updateCareerSetup({ deckNumber: d.value })
+                                close()
+                            }}
+                        />
+                    ))}
+                </View>
+            </SheetModal>
+
+            <SheetModal visible={openSheet === "independentAgenda"} onRequestClose={close} header={<ModalHeader title="INDEPENDENT TRAINING AGENDA" onClose={close} />} footer={null}>
+                <View style={modalShellStyles.modalBodyList}>
+                    {INDEPENDENT_AGENDA_OPTIONS.map((option) => (
+                        <ModalRadioRow
+                            key={option}
+                            label={option}
+                            description={option === "Keep current" ? "Starts with whichever agenda the game remembers from the last training." : undefined}
+                            selected={option === settings.independentTrainingAgenda}
+                            onPress={() => {
+                                updateCareerSetup({ independentTrainingAgenda: option })
                                 close()
                             }}
                         />

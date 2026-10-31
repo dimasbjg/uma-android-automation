@@ -144,6 +144,9 @@ val LabelCareerStartLastLogin = label("career_start_last_login", confidence = 0.
 /** The "TRAINING COMPLETE!" label on the Independent Training dialog. While training it shows "Training..." instead. */
 val LabelCareerStartIndependentTrainingComplete = label("career_start_independent_training_complete")
 
+/** The "Time Left" pill on the Training screen, shown while a started Independent Training runs. The "Training..." text below it bobs, so it cannot be matched. */
+val LabelCareerStartIndependentTrainingTimeLeft = label("career_start_independent_training_time_left", Region.bottomHalf)
+
 /** Spark badge labels keyed by the label text, grouped by badge color. */
 val LabelCareerStartSparkStat: Map<String, ComponentInterface> = listOf("SPD", "STA", "PWR", "GUTS", "WIT").associateWith { label("career_start_spark_${it.lowercase()}") }
 val LabelCareerStartSparkAptitude: Map<String, ComponentInterface> =

@@ -100,7 +100,15 @@ function buildCareerSetupSection(settings: Settings): string {
 🃏 Deck: ${c.deckNumber > 0 ? `Deck ${c.deckNumber}` : "Keep current"}
 👥 Friend Card: ${card ? `${card.title} ${card.name}` : "Smart"}
 🔄 Friend Max Refreshes: ${c.friendMaxRefreshes}
-⏭️ Start the Next Career When Done: ${tick(c.startNextCareerWhenDone)}`
+⏭️ Start the Next Career When Done: ${tick(c.startNextCareerWhenDone)}
+🔁 Independent Training Loop: ${tick(c.independentTrainingLoop)}${
+        c.independentTrainingLoop
+            ? `
+📅 Independent Training Agenda: ${c.independentTrainingAgendaTitle.trim() || c.independentTrainingAgenda}
+⏱️ Independent Training Poll: Every ${c.independentTrainingPollMinutes} min
+⚡ Independent Training Event Boost: ${tick(c.independentTrainingEventBoost)}`
+            : ""
+    }`
 }
 
 /** The banner text that marks a Dailies run, also read by the event log parser. */

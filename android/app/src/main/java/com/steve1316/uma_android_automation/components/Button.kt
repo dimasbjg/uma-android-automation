@@ -239,6 +239,9 @@ val ButtonCareerStartLegacyReset = button("career_start_legacy_reset", Region.bo
 // "Start!" shares its prefix with "Start Career!" and scores 0.87 against it, so it needs a stricter threshold.
 val ButtonCareerStartIndependentStart = button("career_start_independent_start", Region.bottomHalf, confidence = 0.95)
 
+/** The Edit button on the Agenda row of Final Confirmation's Independent Training tab. It moves as the tab scrolls, so it is found anywhere on screen. */
+val ButtonCareerStartIndependentAgendaEdit = button("career_start_independent_agenda_edit")
+
 /** The green Career button on the Independent Training dialog, which claims a finished one. */
 val ButtonCareerStartIndependentCareer = button("career_start_independent_career", Region.bottomHalf)
 
